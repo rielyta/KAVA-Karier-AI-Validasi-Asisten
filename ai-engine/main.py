@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import requests
+from fastapi.responses import RedirectResponse
 
 load_dotenv()
 
@@ -195,6 +196,11 @@ def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
 
 
 # ENDPOINTS
+
+@app.get("/", include_in_schema=False)
+def read_root():
+    return RedirectResponse(url="/docs")
+
 @app.get("/api/health", summary="Health Check")
 def health_check():
     return {"status": "ok", "service": "KAVA AI Engine v2.0"}

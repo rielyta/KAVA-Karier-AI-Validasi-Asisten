@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import requests
+from fastapi.responses import RedirectResponse
 
 load_dotenv()
 
@@ -159,6 +160,10 @@ def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
         "progress_bar_value": coverage / 100
     }
 
+
+@app.get("/", include_in_schema=False)
+def read_root():
+    return RedirectResponse(url="/docs")
 
 @app.get("/api/health")
 def health_check():
