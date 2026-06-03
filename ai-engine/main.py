@@ -1,4 +1,5 @@
 import os, json, pickle
+from matplotlib.pyplot import text
 import uvicorn
 import numpy as np
 import tensorflow as tf
@@ -8,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import requests
 from fastapi.responses import RedirectResponse
+from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
 
@@ -46,7 +48,6 @@ class StripMask(tf.keras.layers.Layer):
     def get_config(self):
         return super().get_config()
 
-
 @tf.keras.utils.register_keras_serializable()
 class AttentionPooling(tf.keras.layers.Layer):
     def __init__(self, units=128, **kwargs):
@@ -71,7 +72,6 @@ class AttentionPooling(tf.keras.layers.Layer):
         config = super().get_config()
         config.update({'units': self.units})
         return config
-
 
 @tf.keras.utils.register_keras_serializable()
 class FocalLoss(tf.keras.losses.Loss):
@@ -120,13 +120,18 @@ try:
 
     with open(f"{ARTIFACT_DIR}/skill_gap_db.json", "r") as f:
         skill_gap_db = json.load(f)
+        
+    with open(f"{ARTIFACT_DIR}/tfidf_vectorizer.pkl", "rb") as f:
+        tfidf_vectorizer = pickle.load(f)
+        
+    with open(f"{ARTIFACT_DIR}/domain_vectors.pkl", "rb") as f:
+        domain_vectors = pickle.load(f)
 
     print("✅ KAVA API siap — semua artifact berhasil dimuat.")
 
 except Exception as e:
     print(f"❌ GAGAL MEMUAT MODEL: {e}")
     raise RuntimeError(f"Model load error: {e}")
-
 
 # REQUEST/RESPONSE SCHEMAS
 class CVPayload(BaseModel):
@@ -160,30 +165,59 @@ def _prepare_features(data: CVPayload):
     return data_scaler.transform(num_feat)
 
 
-def _get_top3_predictions(text: str, num_scaled: np.ndarray) -> list:
+def _get_top3_predictions(text: str, num_scaled: np.ndarray, skills_raw: str) -> list:
     text_token = text_vectorizer(np.array([text]))
     probs      = kava_model.predict(
         {'text_input': text_token, 'numeric_input': num_scaled},
         verbose=0
     )[0]
+    
+    cv_full_text = (text + " " + skills_raw).lower()
+    cv_vector = tfidf_vectorizer.transform([cv_full_text])
+    
+    kw_scores = {}
+    for domain, domain_vec in domain_vectors.items():
+        sim_score = cosine_similarity(cv_vector, domain_vec)[0][0]
+        kw_scores[domain] = round(sim_score * 100, 1)
 
-    top3_idx = np.argsort(probs)[-3:][::-1]
+    combined_scores = {}
+    for i, role in enumerate(label_encoder.classes_):
+        dl_score  = float(probs[i]) * 100
+        semantic_score = kw_scores.get(role, 0.0) 
+        
+        combined_scores[role] = {
+            'dl_confidence': round(dl_score, 2),
+            'keyword_score': semantic_score,
+            'final_score':   round(dl_score * 0.8 + semantic_score * 0.2, 2)
+        }
+
+    top3 = sorted(combined_scores.items(), key=lambda x: x[1]['final_score'], reverse=True)[:3]
     return [
         {
-            "rank":       int(rank),
-            "role":       label_encoder.inverse_transform([int(idx)])[0],
-            "confidence": round(float(probs[idx]) * 100, 2)
+            "rank":          rank + 1,
+            "role":          role,
+            "dl_confidence": scores["dl_confidence"],
+            "keyword_score": scores["keyword_score"],
+            "final_score":   scores["final_score"]
         }
-        for rank, idx in enumerate(top3_idx, 1)
+        for rank, (role, scores) in enumerate(top3)
     ]
 
 
-def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
+def _analyze_skill_gap(cv_skills_raw: str, full_cv_text: str, predicted_role: str) -> dict:
     cv_skills = set(s.strip().lower() for s in cv_skills_raw.split(',') if s.strip())
     required  = skill_gap_db.get(predicted_role, [])
+    full_text_lower = full_cv_text.lower()
 
-    matched  = [s for s in required if any(s in cs or cs in s for cs in cv_skills)]
-    missing  = [s for s in required if s not in matched]
+    matched = []
+    missing = []
+    for req in required:
+        req_lower = req.lower()
+        if any(req_lower in cs or cs in req_lower for cs in cv_skills) or f" {req_lower} " in f" {full_text_lower} ":
+            matched.append(req)
+        else:
+            missing.append(req)
+
     coverage = round(len(matched) / len(required) * 100, 1) if required else 0
 
     return {
@@ -194,9 +228,7 @@ def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
         "progress_bar_value": coverage / 100
     }
 
-
 # ENDPOINTS
-
 @app.get("/", include_in_schema=False)
 def read_root():
     return RedirectResponse(url="/docs")
@@ -205,19 +237,20 @@ def read_root():
 def health_check():
     return {"status": "ok", "service": "KAVA AI Engine v2.0"}
 
-
 @app.post("/api/predict-career", summary="Top-3 Role Prediction + Skill Gap + AI Coach")
 def predict_career(data: CVPayload):
     try:
         num_scaled = _prepare_features(data)
-        top3       = _get_top3_predictions(data.text, num_scaled)
-        gap        = _analyze_skill_gap(data.skills_raw, top3[0]["role"])
+        top3       = _get_top3_predictions(data.text, num_scaled, data.skills_raw)
+        
+        # Kirim skills_raw dan full text CV untuk deteksi yang lebih pintar
+        gap        = _analyze_skill_gap(data.skills_raw, data.text, top3[0]["role"])
 
         # ─── Mistral AI Career Coach ───
         prompt = f"""Anda adalah KAVA (Karier AI Validasi Asisten), asisten karir profesional.
 
 Profil Kandidat:
-- Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['confidence']}% confidence)
+- Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['final_score']}% final score)
 - Pengalaman: {data.experience_years} tahun
 - Skills yang dimiliki: {data.skills_raw}
 - Skills yang perlu ditingkatkan: {', '.join(gap['missing_skills'])}
@@ -241,7 +274,7 @@ Format respons: ringkas, actionable, maksimal 200 kata."""
                 "max_tokens": 400
             },
             timeout=30
-)
+        )
         mistral_resp.raise_for_status()
         coach_text = mistral_resp.json()["choices"][0]["message"]["content"]
 
@@ -255,11 +288,10 @@ Format respons: ringkas, actionable, maksimal 200 kata."""
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Error AI Engine: {str(err)}")
 
-
 @app.post("/api/skill-gap", summary="Skill Gap saja (tanpa prediksi ulang)")
-def skill_gap_only(role: str, skills_raw: str):
+def skill_gap_only(role: str, skills_raw: str, text: str = ""):
     try:
-        result = _analyze_skill_gap(skills_raw, role)
+        result = _analyze_skill_gap(skills_raw, text, role)
         return {"status": "success", "skill_gap": result}
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
