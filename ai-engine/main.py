@@ -1,4 +1,5 @@
-import os, json, pickle
+import os, json, pickle, re
+import httpx
 import uvicorn
 import numpy as np
 import tensorflow as tf
@@ -6,7 +7,8 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import requests
+from fastapi.responses import RedirectResponse
+from sklearn.metrics.pairwise import cosine_similarity
 
 load_dotenv()
 
@@ -32,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# CUSTOM LAYER (harus didefinisikan sebelum load_model)
+# CUSTOM LAYER
 @tf.keras.utils.register_keras_serializable()
 class StripMask(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
@@ -44,7 +46,6 @@ class StripMask(tf.keras.layers.Layer):
         return None
     def get_config(self):
         return super().get_config()
-
 
 @tf.keras.utils.register_keras_serializable()
 class AttentionPooling(tf.keras.layers.Layer):
@@ -70,7 +71,6 @@ class AttentionPooling(tf.keras.layers.Layer):
         config = super().get_config()
         config.update({'units': self.units})
         return config
-
 
 @tf.keras.utils.register_keras_serializable()
 class FocalLoss(tf.keras.losses.Loss):
@@ -119,13 +119,19 @@ try:
 
     with open(f"{ARTIFACT_DIR}/skill_gap_db.json", "r") as f:
         skill_gap_db = json.load(f)
+        
+    with open(f"{ARTIFACT_DIR}/tfidf_vectorizer.pkl", "rb") as f:
+        tfidf_vectorizer = pickle.load(f)
+        
+    with open(f"{ARTIFACT_DIR}/domain_vectors.pkl", "rb") as f:
+        domain_vectors = pickle.load(f)
 
+    assert set(domain_vectors.keys()) == set(label_encoder.classes_), "⚠️ ERROR: Key domain_vectors dan label_encoder tidak sinkron!"
     print("✅ KAVA API siap — semua artifact berhasil dimuat.")
 
 except Exception as e:
     print(f"❌ GAGAL MEMUAT MODEL: {e}")
     raise RuntimeError(f"Model load error: {e}")
-
 
 # REQUEST/RESPONSE SCHEMAS
 class CVPayload(BaseModel):
@@ -134,16 +140,20 @@ class CVPayload(BaseModel):
     experience_years: float = Field(..., ge=0, le=40, description="Pengalaman dalam tahun (0-40)")
     cert_count: int = Field(..., ge=0, description="Jumlah sertifikasi")
     has_education: int = Field(..., ge=0, le=1, description="1 = punya info pendidikan, 0 = tidak")
+    has_highlights: int = Field(default=0, ge=0, le=1, description="1 = punya highlights, 0 = tidak")
 
+def clean_text(text: str) -> str:
+    text = str(text).lower()
+    text = re.sub(r'[^a-z0-9\s,\.\'\-\+#/]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 # HELPER FUNCTIONS
 def _prepare_features(data: CVPayload):
-    is_fresh = 1 if data.experience_years < 2 else 0
-    is_exp   = 1 if data.experience_years >= 5 else 0
     has_cert = 1 if data.cert_count > 0 else 0
-    has_hl   = 1  # assume ada highlights jika ada summary
+    has_hl   = data.has_highlights
 
-    skills_count_est = min(len(data.skills_raw.split(',')), 36)
+    skills_count_est = 0 if not data.skills_raw.strip() else min(len([s for s in data.skills_raw.split(',') if s.strip()]), 36)
 
     num_feat = np.array([[
         min(data.experience_years, 40),
@@ -151,38 +161,76 @@ def _prepare_features(data: CVPayload):
         has_cert,
         data.cert_count,
         data.has_education,
-        is_fresh,
-        is_exp,
         has_hl
     ]], dtype=np.float32)
 
     return data_scaler.transform(num_feat)
 
 
-def _get_top3_predictions(text: str, num_scaled: np.ndarray) -> list:
-    text_token = text_vectorizer(np.array([text]))
-    probs      = kava_model.predict(
+def _get_top3_predictions(text: str, num_scaled: np.ndarray, skills_raw: str) -> list:
+    parts_dl = []
+    if skills_raw.strip():
+        for _ in range(4):
+            parts_dl.append(skills_raw)
+    parts_dl.append(text)
+    
+    cleaned_dl_text = clean_text(' '.join(parts_dl))
+    text_token = text_vectorizer(np.array([cleaned_dl_text]))
+    
+    probs = kava_model.predict(
         {'text_input': text_token, 'numeric_input': num_scaled},
         verbose=0
     )[0]
+    
+    cleaned_tfidf_text = clean_text(f"{skills_raw} {text}")
+    cv_vector = tfidf_vectorizer.transform([cleaned_tfidf_text])
+    
+    kw_scores = {}
+    for domain, domain_vec in domain_vectors.items():
+        sim_score = cosine_similarity(cv_vector, domain_vec)[0][0]
+        kw_scores[domain] = round(sim_score * 100, 1)
 
-    top3_idx = np.argsort(probs)[-3:][::-1]
+    combined_scores = {}
+    for i, role in enumerate(label_encoder.classes_):
+        dl_score  = float(probs[i]) * 100
+        semantic_score = kw_scores.get(role, 0.0) 
+        
+        combined_scores[role] = {
+            'dl_confidence': round(dl_score, 2),
+            'keyword_score': semantic_score,
+            'final_score':   round(dl_score * 0.8 + semantic_score * 0.2, 2)
+        }
+
+    top3 = sorted(combined_scores.items(), key=lambda x: x[1]['final_score'], reverse=True)[:3]
     return [
         {
-            "rank":       int(rank),
-            "role":       label_encoder.inverse_transform([int(idx)])[0],
-            "confidence": round(float(probs[idx]) * 100, 2)
+            "rank":          rank + 1,
+            "role":          role,
+            "dl_confidence": scores["dl_confidence"],
+            "keyword_score": scores["keyword_score"],
+            "final_score":   scores["final_score"]
         }
-        for rank, idx in enumerate(top3_idx, 1)
+        for rank, (role, scores) in enumerate(top3)
     ]
-
-
-def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
-    cv_skills = set(s.strip().lower() for s in cv_skills_raw.split(',') if s.strip())
+    
+def _analyze_skill_gap(cv_skills_raw: str, full_cv_text: str, predicted_role: str) -> dict:
+    cv_skills = {s.strip().lower() for s in cv_skills_raw.split(',') if s.strip()}
     required  = skill_gap_db.get(predicted_role, [])
+    full_text_lower = f" {full_cv_text.lower()} " 
 
-    matched  = [s for s in required if any(s in cs or cs in s for cs in cv_skills)]
-    missing  = [s for s in required if s not in matched]
+    matched = []
+    missing = []
+    
+    for req in required:
+        req_lower = req.lower()
+    
+        if req_lower in cv_skills:
+            matched.append(req)
+        elif f" {req_lower} " in full_text_lower or f" {req_lower}," in full_text_lower:
+            matched.append(req)
+        else:
+            missing.append(req)
+
     coverage = round(len(matched) / len(required) * 100, 1) if required else 0
 
     return {
@@ -193,51 +241,53 @@ def _analyze_skill_gap(cv_skills_raw: str, predicted_role: str) -> dict:
         "progress_bar_value": coverage / 100
     }
 
-
 # ENDPOINTS
+@app.get("/", include_in_schema=False)
+def read_root():
+    return RedirectResponse(url="/docs")
+
 @app.get("/api/health", summary="Health Check")
 def health_check():
     return {"status": "ok", "service": "KAVA AI Engine v2.0"}
 
-
 @app.post("/api/predict-career", summary="Top-3 Role Prediction + Skill Gap + AI Coach")
-def predict_career(data: CVPayload):
+async def predict_career(data: CVPayload):
     try:
         num_scaled = _prepare_features(data)
-        top3       = _get_top3_predictions(data.text, num_scaled)
-        gap        = _analyze_skill_gap(data.skills_raw, top3[0]["role"])
+        top3       = _get_top3_predictions(data.text, num_scaled, data.skills_raw)
+        gap        = _analyze_skill_gap(data.skills_raw, data.text, top3[0]["role"])
 
         # ─── Mistral AI Career Coach ───
         prompt = f"""Anda adalah KAVA (Karier AI Validasi Asisten), asisten karir profesional.
 
-Profil Kandidat:
-- Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['confidence']}% confidence)
-- Pengalaman: {data.experience_years} tahun
-- Skills yang dimiliki: {data.skills_raw}
-- Skills yang perlu ditingkatkan: {', '.join(gap['missing_skills'])}
+        Profil Kandidat:
+        - Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['final_score']}% final score)
+        - Pengalaman: {data.experience_years} tahun
+        - Skills yang dimiliki: {data.skills_raw}
+        - Skills yang perlu ditingkatkan: {', '.join(gap['missing_skills'])}
 
-Berikan dalam Bahasa Indonesia:
-1. **Saran Karir**: Langkah konkret berikutnya untuk kandidat ini
-2. **Skill yang Harus Dipelajari**: Dari daftar missing skills, pilih 3 yang paling penting dan jelaskan mengapa
-3. **Rekomendasi Sertifikasi**: 1 sertifikasi internasional yang paling relevan untuk menembus pasar kerja {top3[0]['role']}
+        Berikan dalam Bahasa Indonesia:
+        1. **Saran Karir**: Langkah konkret berikutnya untuk kandidat ini
+        2. **Skill yang Harus Dipelajari**: Dari daftar missing skills, pilih 3 yang paling penting dan jelaskan mengapa
+        3. **Rekomendasi Sertifikasi**: 1 sertifikasi internasional yang paling relevan untuk menembus pasar kerja {top3[0]['role']}
 
-Format respons: ringkas, actionable, maksimal 200 kata."""
-
-        mistral_resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                "Content-Type": "application/json"
+        Format respons: ringkas, actionable, maksimal 200 kata."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            mistral_resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MISTRAL_API_KEY}",
+                    "Content-Type": "application/json"
+                    },
+                json={
+                    "model": MISTRAL_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 400
                 },
-            json={
-                "model": MISTRAL_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 400
-            },
-            timeout=30
-)
-        mistral_resp.raise_for_status()
-        coach_text = mistral_resp.json()["choices"][0]["message"]["content"]
+                timeout=30
+            )
+            mistral_resp.raise_for_status()
+            coach_text = mistral_resp.json()["choices"][0]["message"]["content"]
 
         return {
             "status":           "success",
@@ -245,19 +295,16 @@ Format respons: ringkas, actionable, maksimal 200 kata."""
             "skill_gap":        gap,
             "ai_career_coach":  coach_text
         }
-
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Error AI Engine: {str(err)}")
 
-
 @app.post("/api/skill-gap", summary="Skill Gap saja (tanpa prediksi ulang)")
-def skill_gap_only(role: str, skills_raw: str):
+def skill_gap_only(role: str, skills_raw: str, text: str = ""):
     try:
-        result = _analyze_skill_gap(skills_raw, role)
+        result = _analyze_skill_gap(skills_raw, text, role)
         return {"status": "success", "skill_gap": result}
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+numpy<2.0
+tensorflow-cpu==2.10.0
+scikit-learn
+pydantic
+httpx
+python-dotenv
+gdown
