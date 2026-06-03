@@ -135,16 +135,16 @@ class CVPayload(BaseModel):
     experience_years: float = Field(..., ge=0, le=40, description="Pengalaman dalam tahun (0-40)")
     cert_count: int = Field(..., ge=0, description="Jumlah sertifikasi")
     has_education: int = Field(..., ge=0, le=1, description="1 = punya info pendidikan, 0 = tidak")
-
+    has_highlights: int = Field(default=0, ge=0, le=1, description="1 = punya highlights, 0 = tidak")
 
 # HELPER FUNCTIONS
 def _prepare_features(data: CVPayload):
     is_fresh = 1 if data.experience_years < 2 else 0
     is_exp   = 1 if data.experience_years >= 5 else 0
     has_cert = 1 if data.cert_count > 0 else 0
-    has_hl   = 1  # assume ada highlights jika ada summary
+    has_hl   = data.has_highlights
 
-    skills_count_est = min(len(data.skills_raw.split(',')), 36)
+    skills_count_est = 0 if not data.skills_raw.strip() else min(len([s for s in data.skills_raw.split(',') if s.strip()]), 36)
 
     num_feat = np.array([[
         min(data.experience_years, 40),
