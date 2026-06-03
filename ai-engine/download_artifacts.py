@@ -3,13 +3,13 @@ import gdown, os
 os.makedirs("artifacts", exist_ok=True)
 
 ARTIFACTS = {
-    "artifacts/kava_best_model.keras": "1mP9Jh6JpGq-i7aTFosE5PVbBIkhjImqf",
-    "artifacts/vectorizer.pkl":        "1Gwn0rQxd32Abg35F03rkmvobnOFu50Gr",
-    "artifacts/scaler.pkl":            "1bIrXkMoPY_ibf0BB4Pb4_5zzWVX3SfcH",
-    "artifacts/label_encoder.pkl":     "1HLNegQ0JWQ52kaH2iP_JxLpR1jcAqy15",
-    "artifacts/skill_gap_db.json":     "1SsxqEmTgRbCMg_AAxlwdKsLIW0s1inqW",
-    "artifacts/tfidf_vectorizer.pkl":  "1FVbY48uDLmN7rzZPy3HnOqd2s_Ztgw_D",
-    "artifacts/domain_vectors.pkl":    "1B5zqjX72BtJOLEVnDYH2-eONnkj1P7ol",
+    "artifacts/kava_best_model.keras": "1ql27D_QguVqhFSbWTCqdeYrNBIoQlv4K",
+    "artifacts/vectorizer.pkl":        "12ESnbUSJ4De3SrvUm-dJihvsNe1Arb09",
+    "artifacts/scaler.pkl":            "1FJmKOxcJPdJ1EQUcDIx41Lq-XJ3f81J6",
+    "artifacts/label_encoder.pkl":     "1h_aBWlYW1r4NQ-idL4T8iGdes7GwTBfX",
+    "artifacts/skill_gap_db.json":     "1hUHedXJGJWF2VhRnC1PYy1Tf25uG1Ak1",
+    "artifacts/tfidf_vectorizer.pkl":  "1BRhGuJY0ktm0e-8g_QKTEa48tsyabo3R",
+    "artifacts/domain_vectors.pkl":    "1qt4fJgKTw8KhDju6AKnT-kHw1594nTBP",
 }
 
 for path, file_id in ARTIFACTS.items():

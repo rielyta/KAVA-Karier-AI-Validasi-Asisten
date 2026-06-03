@@ -1,5 +1,5 @@
-import os, json, pickle
-from matplotlib.pyplot import text
+import os, json, pickle, re
+import httpx
 import uvicorn
 import numpy as np
 import tensorflow as tf
@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import requests
 from fastapi.responses import RedirectResponse
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -127,6 +126,7 @@ try:
     with open(f"{ARTIFACT_DIR}/domain_vectors.pkl", "rb") as f:
         domain_vectors = pickle.load(f)
 
+    assert set(domain_vectors.keys()) == set(label_encoder.classes_), "⚠️ ERROR: Key domain_vectors dan label_encoder tidak sinkron!"
     print("✅ KAVA API siap — semua artifact berhasil dimuat.")
 
 except Exception as e:
@@ -142,10 +142,14 @@ class CVPayload(BaseModel):
     has_education: int = Field(..., ge=0, le=1, description="1 = punya info pendidikan, 0 = tidak")
     has_highlights: int = Field(default=0, ge=0, le=1, description="1 = punya highlights, 0 = tidak")
 
+def clean_text(text: str) -> str:
+    text = str(text).lower()
+    text = re.sub(r'[^a-z0-9\s,\.\'\-\+#/]', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 # HELPER FUNCTIONS
 def _prepare_features(data: CVPayload):
-    is_fresh = 1 if data.experience_years < 2 else 0
-    is_exp   = 1 if data.experience_years >= 5 else 0
     has_cert = 1 if data.cert_count > 0 else 0
     has_hl   = data.has_highlights
 
@@ -157,8 +161,6 @@ def _prepare_features(data: CVPayload):
         has_cert,
         data.cert_count,
         data.has_education,
-        is_fresh,
-        is_exp,
         has_hl
     ]], dtype=np.float32)
 
@@ -166,14 +168,22 @@ def _prepare_features(data: CVPayload):
 
 
 def _get_top3_predictions(text: str, num_scaled: np.ndarray, skills_raw: str) -> list:
-    text_token = text_vectorizer(np.array([text]))
-    probs      = kava_model.predict(
+    parts_dl = []
+    if skills_raw.strip():
+        for _ in range(4):
+            parts_dl.append(skills_raw)
+    parts_dl.append(text)
+    
+    cleaned_dl_text = clean_text(' '.join(parts_dl))
+    text_token = text_vectorizer(np.array([cleaned_dl_text]))
+    
+    probs = kava_model.predict(
         {'text_input': text_token, 'numeric_input': num_scaled},
         verbose=0
     )[0]
     
-    cv_full_text = (text + " " + skills_raw).lower()
-    cv_vector = tfidf_vectorizer.transform([cv_full_text])
+    cleaned_tfidf_text = clean_text(f"{skills_raw} {text}")
+    cv_vector = tfidf_vectorizer.transform([cleaned_tfidf_text])
     
     kw_scores = {}
     for domain, domain_vec in domain_vectors.items():
@@ -202,18 +212,21 @@ def _get_top3_predictions(text: str, num_scaled: np.ndarray, skills_raw: str) ->
         }
         for rank, (role, scores) in enumerate(top3)
     ]
-
-
+    
 def _analyze_skill_gap(cv_skills_raw: str, full_cv_text: str, predicted_role: str) -> dict:
-    cv_skills = set(s.strip().lower() for s in cv_skills_raw.split(',') if s.strip())
+    cv_skills = {s.strip().lower() for s in cv_skills_raw.split(',') if s.strip()}
     required  = skill_gap_db.get(predicted_role, [])
-    full_text_lower = full_cv_text.lower()
+    full_text_lower = f" {full_cv_text.lower()} " 
 
     matched = []
     missing = []
+    
     for req in required:
         req_lower = req.lower()
-        if any(req_lower in cs or cs in req_lower for cs in cv_skills) or f" {req_lower} " in f" {full_text_lower} ":
+    
+        if req_lower in cv_skills:
+            matched.append(req)
+        elif f" {req_lower} " in full_text_lower or f" {req_lower}," in full_text_lower:
             matched.append(req)
         else:
             missing.append(req)
@@ -238,45 +251,43 @@ def health_check():
     return {"status": "ok", "service": "KAVA AI Engine v2.0"}
 
 @app.post("/api/predict-career", summary="Top-3 Role Prediction + Skill Gap + AI Coach")
-def predict_career(data: CVPayload):
+async def predict_career(data: CVPayload):
     try:
         num_scaled = _prepare_features(data)
         top3       = _get_top3_predictions(data.text, num_scaled, data.skills_raw)
-        
-        # Kirim skills_raw dan full text CV untuk deteksi yang lebih pintar
         gap        = _analyze_skill_gap(data.skills_raw, data.text, top3[0]["role"])
 
         # ─── Mistral AI Career Coach ───
         prompt = f"""Anda adalah KAVA (Karier AI Validasi Asisten), asisten karir profesional.
 
-Profil Kandidat:
-- Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['final_score']}% final score)
-- Pengalaman: {data.experience_years} tahun
-- Skills yang dimiliki: {data.skills_raw}
-- Skills yang perlu ditingkatkan: {', '.join(gap['missing_skills'])}
+        Profil Kandidat:
+        - Role diprediksi (Top-1): {top3[0]['role']} ({top3[0]['final_score']}% final score)
+        - Pengalaman: {data.experience_years} tahun
+        - Skills yang dimiliki: {data.skills_raw}
+        - Skills yang perlu ditingkatkan: {', '.join(gap['missing_skills'])}
 
-Berikan dalam Bahasa Indonesia:
-1. **Saran Karir**: Langkah konkret berikutnya untuk kandidat ini
-2. **Skill yang Harus Dipelajari**: Dari daftar missing skills, pilih 3 yang paling penting dan jelaskan mengapa
-3. **Rekomendasi Sertifikasi**: 1 sertifikasi internasional yang paling relevan untuk menembus pasar kerja {top3[0]['role']}
+        Berikan dalam Bahasa Indonesia:
+        1. **Saran Karir**: Langkah konkret berikutnya untuk kandidat ini
+        2. **Skill yang Harus Dipelajari**: Dari daftar missing skills, pilih 3 yang paling penting dan jelaskan mengapa
+        3. **Rekomendasi Sertifikasi**: 1 sertifikasi internasional yang paling relevan untuk menembus pasar kerja {top3[0]['role']}
 
-Format respons: ringkas, actionable, maksimal 200 kata."""
-
-        mistral_resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {MISTRAL_API_KEY}",
-                "Content-Type": "application/json"
+        Format respons: ringkas, actionable, maksimal 200 kata."""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            mistral_resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MISTRAL_API_KEY}",
+                    "Content-Type": "application/json"
+                    },
+                json={
+                    "model": MISTRAL_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 400
                 },
-            json={
-                "model": MISTRAL_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 400
-            },
-            timeout=30
-        )
-        mistral_resp.raise_for_status()
-        coach_text = mistral_resp.json()["choices"][0]["message"]["content"]
+                timeout=30
+            )
+            mistral_resp.raise_for_status()
+            coach_text = mistral_resp.json()["choices"][0]["message"]["content"]
 
         return {
             "status":           "success",
@@ -284,7 +295,6 @@ Format respons: ringkas, actionable, maksimal 200 kata."""
             "skill_gap":        gap,
             "ai_career_coach":  coach_text
         }
-
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Error AI Engine: {str(err)}")
 
@@ -295,7 +305,6 @@ def skill_gap_only(role: str, skills_raw: str, text: str = ""):
         return {"status": "success", "skill_gap": result}
     except Exception as err:
         raise HTTPException(status_code=500, detail=str(err))
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
