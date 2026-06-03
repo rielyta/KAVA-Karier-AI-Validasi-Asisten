@@ -33,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# CUSTOM LAYER (harus didefinisikan sebelum load_model)
+# CUSTOM LAYER
 @tf.keras.utils.register_keras_serializable()
 class StripMask(tf.keras.layers.Layer):
     def __init__(self, **kwargs):
