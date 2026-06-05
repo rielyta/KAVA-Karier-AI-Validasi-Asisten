@@ -14,7 +14,7 @@ export default function DeleteAccountModal({ isOpen, onClose, onConfirm, error, 
                     Hapus Akun Permanen?
                 </h3>
                 <p className="text-sm text-gray-300 mb-6 leading-relaxed">
-                    Tindakan ini tidak dapat dibatalkan. Menekan tombol d bawah dpaat menghapus seluruh data karier dan data diri Anda dari basis data KAVA.
+                    Tindakan ini tidak dapat dibatalkan. Menekan tombol di bawah dapat menghapus seluruh data karier dan data diri Anda dari basis data KAVA.
                 </p>
 
                 {error && (
