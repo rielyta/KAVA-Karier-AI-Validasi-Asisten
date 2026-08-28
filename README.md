@@ -1,62 +1,62 @@
 # KAVA — Karier AI Validasi Asisten
 
-> Platform analisis CV berbasis AI untuk prediksi karier dan rekomendasi skill gap.
+> An AI-powered CV analysis platform for career prediction and skill gap recommendations.
 
 🔗 **Live Demo:** [https://kava-karier-ai-validasi-asisten.vercel.app](https://kava-karier-ai-validasi-asisten.vercel.app/)
 
 🔗 **Backend API:** [valiant-victory-production-032b.up.railway.app](https://valiant-victory-production-032b.up.railway.app)
 
-🔗 **Dashboard Streamlit:** [kava-analytics.streamlit.app](https://kava-analytics.streamlit.app/)
+🔗 **Streamlit Dashboard:** [kava-analytics.streamlit.app](https://kava-analytics.streamlit.app/)
 
-🔗 **Streamlit Github Repo:** [github.com/clrsahlim/KAVA-Streamlit](https://github.com/clrsahlim/KAVA-Streamlit)
+🔗 **Streamlit GitHub Repo:** [github.com/clrsahlim/KAVA-Streamlit](https://github.com/clrsahlim/KAVA-Streamlit)
 
-🔗 **Hugging face AI KAVA:** [https://huggingface.co/spaces/parulls/kava-ai-engine](https://huggingface.co/spaces/parulls/kava-ai-engine)
+🔗 **Hugging Face AI Engine:** [https://huggingface.co/spaces/parulls/kava-ai-engine](https://huggingface.co/spaces/parulls/kava-ai-engine)
 
-🔗 **Artifacts Model KAVA:** [Tautan Model AI](https://drive.google.com/drive/folders/1vpD8p66A0bX8fvA4HtVyovODLdJMRlaJ)
+🔗 **Model Artifacts:** [AI Model Link](https://drive.google.com/drive/folders/1vpD8p66A0bX8fvA4HtVyovODLdJMRlaJ)
 
 ---
 
-## Daftar Isi
+## Table of Contents
 
-- [Tentang KAVA](#tentang-kava)
-- [Fitur](#fitur)
-- [Arsitektur](#arsitektur)
+- [About KAVA](#about-kava)
+- [Features](#features)
+- [Architecture](#architecture)
 - [Tech Stack](#tech-stack)
-- [Struktur Repositori](#struktur-repositori)
-- [Cara Menjalankan Lokal](#cara-menjalankan-lokal)
+- [Repository Structure](#repository-structure)
+- [Running Locally](#running-locally)
 - [Environment Variables](#environment-variables)
 - [API Endpoints](#api-endpoints)
-- [Tim](#tim)
+- [Team](#team)
 
 ---
 
-## Tentang KAVA
+## About KAVA
 
-KAVA (Karier AI Validasi Asisten) adalah aplikasi web yang membantu pengguna menganalisis CV mereka secara otomatis menggunakan kecerdasan buatan. Pengguna cukup mengunggah CV dalam format PDF, dan KAVA akan:
+KAVA (Karier AI Validasi Asisten) is a web application that helps users automatically analyze their CVs using artificial intelligence. Users simply upload their CV in PDF format, and KAVA will:
 
-1. Mengekstrak informasi dari CV (skills, pengalaman, pendidikan, sertifikasi)
-2. Memprediksi **Top 3 Role** yang paling sesuai dengan profil pengguna
-3. Menganalisis **skill gap** antara profil pengguna dan kebutuhan industri
-4. Memberikan **saran karier personal** menggunakan Generative AI (Mistral)
-
----
-
-## Fitur
-
-- Register & login dengan email/password atau Google OAuth
-- Verifikasi email via OTP
-- Forgot password & reset password via email
-- Upload CV (PDF, maks. 5MB) dan analisis otomatis
-- Riwayat analisis CV dengan pagination
-- Manaemen profil (ubah nama, ubah/set password, hapus akun)
-- Tampilan responsif (mobile & desktop)
+1. Extract information from the CV (skills, experience, education, certifications)
+2. Predict the **Top 3 Roles** most suited to the user's profile
+3. Analyze the **skill gap** between the user's profile and industry requirements
+4. Provide **personalized career advice** using Generative AI (Mistral)
 
 ---
 
-## Arsitektur
+## Features
+
+- Register and log in with email/password or Google OAuth
+- Email verification via OTP
+- Forgot password and reset password via email
+- Upload CV (PDF, max 5MB) and automatic analysis
+- CV analysis history with pagination
+- Profile management (update name, change/set password, delete account)
+- Responsive layout for mobile and desktop
+
+---
+
+## Architecture
 
 ```
-Pengguna (Browser)
+User (Browser)
       │
       ▼
 Frontend — Vite + React (Railway)
@@ -75,7 +75,7 @@ Backend API — Express.js (Railway)
 
 ## Tech Stack
 
-| Komponen | Teknologi | Platform |
+| Component | Technology | Platform |
 |---|---|---|
 | Frontend | React.js + Vite + Tailwind CSS | Vercel |
 | Backend API | Node.js + Express.js | Railway |
@@ -83,11 +83,11 @@ Backend API — Express.js (Railway)
 | AI Model | TensorFlow + Mistral API | Hugging Face |
 | Database | PostgreSQL | Supabase |
 | Email | Brevo HTTP API | Cloud |
-| Auth Google | google-auth-library | Cloud |
+| Google Auth | google-auth-library | Cloud |
 
 ---
 
-## Struktur Repositori
+## Repository Structure
 
 ```
 KAVA-Karier-AI-Validasi-Asisten/
@@ -122,43 +122,43 @@ KAVA-Karier-AI-Validasi-Asisten/
 
 ---
 
-## Cara Menjalankan Lokal
+## Running Locally
 
-### Prasyarat
+### Prerequisites
 
 - Node.js v18+
 - Python 3.10+
 - PostgreSQL
 - Git
 
-### 1. Clone repositori
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/rielyta/KAVA-Karier-AI-Validasi-Asisten.git
 cd KAVA-Karier-AI-Validasi-Asisten
 ```
 
-### 2. Setup Database
+### 2. Set up the database
 
-Buat database PostgreSQL lokal:
+Create a local PostgreSQL database:
 ```sql
 CREATE DATABASE kava_db;
 ```
 
-### 3. Setup Backend
+### 3. Set up the backend
 
 ```bash
 cd backend
 npm install
 cp .env.example .env
-# Isi .env sesuai konfigurasi lokal
+# Fill in .env with your local configuration
 npm run migrate
 npm run start:dev
 ```
 
-Backend berjalan di `http://localhost:5000`
+Backend runs at `http://localhost:5000`
 
-### 4. Setup CV Extractor
+### 4. Set up the CV extractor
 
 ```bash
 cd cv-extractor
@@ -167,19 +167,19 @@ cp .env.example .env
 python app.py
 ```
 
-CV Extractor berjalan di `http://localhost:5001`
+CV Extractor runs at `http://localhost:5001`
 
-### 5. Setup Frontend
+### 5. Set up the frontend
 
 ```bash
 cd frontend
 npm install
 cp .env.example .env
-# Isi .env sesuai konfigurasi lokal
+# Fill in .env with your local configuration
 npm run dev
 ```
 
-Frontend berjalan di `http://localhost:5173`
+Frontend runs at `http://localhost:5173`
 
 ---
 
@@ -231,53 +231,53 @@ FLASK_DEBUG=false
 ## API Endpoints
 
 ### Authentication
-| Method | Endpoint | Deskripsi |
+| Method | Endpoint | Description |
 |---|---|---|
-| POST | `/users/register` | Register akun baru |
-| POST | `/users/verify` | Verifikasi OTP email |
-| POST | `/users/resend-otp` | Kirim ulang OTP |
-| POST | `/authentications/login` | Login email/password |
-| POST | `/authentications/google` | Login Google OAuth |
+| POST | `/users/register` | Register a new account |
+| POST | `/users/verify` | Verify email OTP |
+| POST | `/users/resend-otp` | Resend OTP |
+| POST | `/authentications/login` | Login with email/password |
+| POST | `/authentications/google` | Login with Google OAuth |
 | PUT | `/authentications/refresh` | Refresh access token |
 | DELETE | `/authentications/logout` | Logout |
 
 ### User
-| Method | Endpoint | Deskripsi |
+| Method | Endpoint | Description |
 |---|---|---|
-| GET | `/users/me` | Get profil pengguna |
-| PUT | `/users/name` | Update nama |
-| PUT | `/users/password` | Update password (butuh password lama) |
-| POST | `/users/password` | Set password (untuk akun Google) |
-| POST | `/users/forgot-password` | Request link reset password |
+| GET | `/users/me` | Get user profile |
+| PUT | `/users/name` | Update name |
+| PUT | `/users/password` | Update password (requires current password) |
+| POST | `/users/password` | Set password (for Google accounts) |
+| POST | `/users/forgot-password` | Request password reset link |
 | POST | `/users/reset-password` | Reset password via token |
-| DELETE | `/users/me` | Hapus akun |
+| DELETE | `/users/me` | Delete account |
 
 ### CV Analysis
-| Method | Endpoint | Deskripsi |
+| Method | Endpoint | Description |
 |---|---|---|
-| POST | `/api/cv/analyze` | Upload & analisis CV (form-data) |
-| GET | `/api/cv/history` | Riwayat analisis CV |
-| GET | `/api/cv/history/:id` | Detail analisis CV |
-| DELETE | `/api/cv/history/:id` | Hapus riwayat analisis |
-| GET | `/api/cv/advice/:id` | Saran karier dari analisis |
+| POST | `/api/cv/analyze` | Upload and analyze CV (form-data) |
+| GET | `/api/cv/history` | CV analysis history |
+| GET | `/api/cv/history/:id` | CV analysis detail |
+| DELETE | `/api/cv/history/:id` | Delete analysis history |
+| GET | `/api/cv/advice/:id` | Career advice from analysis |
 
-> Semua endpoint user & CV analysis membutuhkan header: `Authorization: Bearer <accessToken>`
+> All user and CV analysis endpoints require the header: `Authorization: Bearer <accessToken>`
 
 ---
 
-## Tim
+## Team
 
 **CC26-PSU251 — Coding Camp powered by DBS Foundation 2026**
 
-| Nama | Role |
+| Name | Role |
 |---|---|
 | Desi Maria Elita Silalahi | Full-Stack (Backend) |
 | Nila Bi Idznillah | Full-Stack (Frontend) |
 | Clara Angelin Pijoh | AI Engineer |
 | Parulian Dwi Reslia Simbolon | AI Engineer |
 | Ferarine Chang | Data Scientist |
-| Clarissa Halim| Data Scientist |
+| Clarissa Halim | Data Scientist |
 
 ---
 
-> Dibuat untuk Capstone Project Coding Camp DBS Foundation 2026
+> Built as a Capstone Project for Coding Camp powered by DBS Foundation 2026
